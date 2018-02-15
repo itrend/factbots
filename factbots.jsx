@@ -13,6 +13,10 @@ const formatNumber = (r) => {
     return r.toFixed(2);
 }
 
+const zeParseFloat = (s, valueOnEmpty) => {
+    return s === "" ? valueOnEmpty : parseFloat(s);
+}
+
 
 class BotsComponent extends React.Component {
     constructor(props) {
@@ -137,44 +141,32 @@ class ThroughputComponent extends React.Component {
     }
 
     travelDistanceChanged(event) {
-        const travelDistance = parseFloat(event.target.value);
-        this.setState((ps) => {
-            const stats = new ThroughputStats({...ps, travelDistance});
-            return {
-                travelDistance,
-                throughput: stats.forThroughput(),
-            };
-        });
+        this._parseValueAndUpdateState(event, 'travelDistance', 1, (stats, stateUpdate) => { stateUpdate.throughput = stats.forThroughput(); } );
     }
 
     botCountChanged(event) {
-        const botCount = parseInt(event.target.value);
-        this.setState((ps) => {
-            const stats = new ThroughputStats({...ps, botCount});
-            return {
-                botCount,
-                throughput: stats.forThroughput(),
-            };
-        });
+        this._parseValueAndUpdateState(event, 'botCount', 1, (stats, stateUpdate) => { stateUpdate.throughput = stats.forThroughput(); } );
     }
 
     throughputChanged(event) {
-        this._throughputChanged(event);
+        this._parseValueAndUpdateState(event, 'throughput', null, (stats, stateUpdate) => { stateUpdate.botCount = stats.forBotCount(); });
     }
 
     throughput2Changed(event) {
-        this._throughputChanged(event, 2);
+        this._parseValueAndUpdateState(event, 'throughput', null, (stats, stateUpdate) => { stateUpdate.botCount = stats.forBotCount(); }, (v) => 2*v);
     }
 
-    _throughputChanged(event, multiplier) {
-        const throughput = multiplier * parseFloat(event.target.value);
-        this.setState((ps) => {
-            const stats = new ThroughputStats({...ps, throughput});
-            return {
-                throughput,
-                botCount: stats.forBotCount(),
-            };
-        });
+    _parseValueAndUpdateState(event, stateValueName, valueOnEmpty, updateNewStateFunc, mutatorFunc) {
+        const value = zeParseFloat(event.target.value, valueOnEmpty);
+        if (value != null && !isNaN(value)) {
+            this.setState((ps) => {
+                const mvalue = mutatorFunc ? mutatorFunc(mvalue) : value;
+                const stateUpdate = {[stateValueName]: mvalue};
+                const stats = new ThroughputStats({...ps, ...stateUpdate});
+                updateNewStateFunc(stats, stateUpdate);
+                return stateUpdate;
+            });
+        }
     }
 }
 
@@ -217,7 +209,7 @@ class ChargingComponent extends React.Component {
     }
 
     chargingDistanceChanged(event) {
-        let chargingDistance = parseFloat(event.target.value);
+        const chargingDistance = zeParseFloat(event.target.value, 0);
         if (!isNaN(chargingDistance)) {
             this.setState({chargingDistance});
         }
@@ -227,7 +219,7 @@ class ChargingComponent extends React.Component {
 
 class Robots {
     baseSpeed = 3.0;  // m/s
-    energyBeforeCharge = 1100;  // kJ
+    energyBeforeCharge = 1200;  // kJ
     roboportChargingPower = 1000;  // kW
     chargingTime = this.energyBeforeCharge / this.roboportChargingPower;
 
@@ -283,11 +275,11 @@ class RechargeStats {
         this.chargingDistance = chargingDistance;
 
         this.chargeTravelTimeOneWay = chargingDistance / robots.speed;
-        const overheadTime = 2.0*this.chargeTravelTimeOneWay + robots.chargingTime;
-        const usefulTime = robots.timeUntilRecharge - this.chargeTravelTimeOneWay;
-        const cycleTime = overheadTime + usefulTime;
-        this.overheadFraction = overheadTime / cycleTime;
-        this.chargingFraction = robots.chargingTime / cycleTime;
+        this.overheadTime = 2.0*this.chargeTravelTimeOneWay + robots.chargingTime;
+        this.usefulTime = robots.timeUntilRecharge - this.chargeTravelTimeOneWay;
+        this.cycleTime = this.overheadTime + this.usefulTime;
+        this.overheadFraction = this.overheadTime / this.cycleTime;
+        this.chargingFraction = robots.chargingTime / this.cycleTime;
 
         this.singleBotMeterThroughput = robots.singleBotMeterThroughput * (1.0 - this.overheadFraction);
     }
