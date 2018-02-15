@@ -17,18 +17,27 @@ const formatNumber = (r) => {
 class BotsComponent extends React.Component {
     constructor(props) {
         super(props);
-        this.state = {roboStats: new Robots({cargoUpgrades: 0, speedUpgrades: 0})};
+        const robots = new Robots({cargoUpgrades: 0, speedUpgrades: 0});
+        this.state = {
+            roboStats: robots,
+            chargingStats: new RechargeStats({robots, chargingDistance: 0}),
+        };
     }
 
     upgradesChanged(roboStats) {
         this.setState({roboStats});
     }
 
+    chargingChanged(chargingStats) {
+        this.setState({chargingStats});
+    }
+
     render() {
         return (
             <div>
                 <RobotUpgradesComponent onChange={this.upgradesChanged.bind(this)} />
-                <ThroughputComponent itemsPerMeterSecond={this.state.roboStats.singleBotMeterThroughput} />
+                <ThroughputComponent itemsPerMeterSecond={this.state.chargingStats.singleBotMeterThroughput} />
+                <ChargingComponent onChange={this.chargingChanged.bind(this)} robots={this.state.roboStats}/>
             </div>
         );
     }
@@ -80,6 +89,7 @@ class RobotUpgradesComponent extends React.Component {
                     <li>Distance before recharge needed: <b>{formatNumber(roboStats.distanceUntilRecharge)}</b> m</li>
                     <li>Cargo size: <b>{roboStats.cargoSize}</b></li>
                     <li>Single bot throughput (ignoring recharge): <b>{formatNumber(roboStats.singleBotMeterThroughput)}</b> items*m/s</li>
+                    <li>Charging time: <b>{roboStats.chargingTime}</b> s</li>
                 </ul>
             </div>
         );
@@ -115,13 +125,13 @@ class ThroughputComponent extends React.Component {
         return (
             <div id="throughput_params">
                 <NumberInput id="travel_distance" min="1" max="10000" value={this.state.travelDistance}
-                            label="Travel distance: " onChange={this.travelDistanceChanged.bind(this)} />
+                            label="Travel distance (one way): " onChange={this.travelDistanceChanged.bind(this)} />
                 <NumberInput id="bot_count" min="1" max="100000" value={this.state.botCount}
                             label="Number of bots: " onChange={this.botCountChanged.bind(this)} />
                 <NumberInput id="throughput" min="0" max="1000000" value={this.state.throughput} allowReals={true}
                             label="Throughput (one way): " onChange={this.throughputChanged.bind(this)} suffix="items/sec"/>
                 <NumberInput id="throughput" min="0" max="1000000" value={0.5*this.state.throughput} allowReals={true}
-                            label="Throughput (return): " onChange={this.throughput2Changed.bind(this)} suffix="items/sec"/>
+                            label="Throughput (back-and-forth): " onChange={this.throughput2Changed.bind(this)} suffix="items/sec"/>
             </div>
         );
     }
@@ -169,9 +179,57 @@ class ThroughputComponent extends React.Component {
 }
 
 
+class ChargingComponent extends React.Component {
+    constructor(props) {
+        super(props);
+        this.onChange = props.onChange || (() => {});
+        this.state = {
+            chargingDistance: props.chargingDistance || 0,
+        }
+    }
+
+    componentWillReceiveProps(nextProps) {
+        this.setState((prevState) => prevState);
+    }
+
+    componentDidUpdate(prevProps, prevState) {
+        if (prevState.chargingDistance != this.state.chargingDistance ||
+            prevProps.robots.singleBotMeterThroughput != this.props.robots.singleBotMeterThroughput) {
+            this.onChange(new RechargeStats({robots: this.props.robots, chargingDistance: this.state.chargingDistance}));
+        }
+    }
+
+    render() {
+        const robots = this.props.robots;
+        const stats = new RechargeStats({robots, chargingDistance: this.state.chargingDistance});
+        return (
+            <div id="throughput_params">
+                <NumberInput id="charging_distance" min="0" max="10000" value={this.state.chargingDistance}
+                            label="Charging distance (one-way): " onChange={this.chargingDistanceChanged.bind(this)} />
+                <ul>
+                    <li>Charging penalty: <b>{formatNumber(stats.overheadFraction)}</b></li>
+                    <li>Charging time fraction: <b>{formatNumber(stats.chargingFraction)}</b></li>
+                    <li>Expected % of bots charging at a time: <b>{formatNumber(100.0*stats.chargingFraction)}</b></li>
+                    <li>Single bot throughput (adjusted for recharge): <b>{formatNumber(stats.singleBotMeterThroughput)}</b> items*m/s</li>
+                </ul>
+            </div>
+        );
+    }
+
+    chargingDistanceChanged(event) {
+        let chargingDistance = parseFloat(event.target.value);
+        if (!isNaN(chargingDistance)) {
+            this.setState({chargingDistance});
+        }
+    }
+}
+
+
 class Robots {
     baseSpeed = 3.0;  // m/s
     energyBeforeCharge = 1100;  // kJ
+    roboportChargingPower = 1000;  // kW
+    chargingTime = this.energyBeforeCharge / this.roboportChargingPower;
 
     constructor({cargoUpgrades, speedUpgrades}) {
         this.speed = this.baseSpeed * this._getSpeedMultiplier(speedUpgrades);
@@ -220,6 +278,17 @@ class ThroughputStats {
 
 
 class RechargeStats {
-    constructor({robots}) {
+    constructor({robots, chargingDistance}) {
+        this.robots = robots;
+        this.chargingDistance = chargingDistance;
+
+        this.chargeTravelTimeOneWay = chargingDistance / robots.speed;
+        const overheadTime = 2.0*this.chargeTravelTimeOneWay + robots.chargingTime;
+        const usefulTime = robots.timeUntilRecharge - this.chargeTravelTimeOneWay;
+        const cycleTime = overheadTime + usefulTime;
+        this.overheadFraction = overheadTime / cycleTime;
+        this.chargingFraction = robots.chargingTime / cycleTime;
+
+        this.singleBotMeterThroughput = robots.singleBotMeterThroughput * (1.0 - this.overheadFraction);
     }
 }
