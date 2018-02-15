@@ -2,7 +2,7 @@ const NumberInput = ({id, label, min, max, value, onChange, allowReals, suffix})
     return (
         <p> 
             <label htmlFor={id}>{label}</label>
-            <input type="number" id={id} min={min} max={max} step={allowReals ? "0.01" : "1"}
+            <input type="number" id={id} min={min} max={max} step={allowReals ? "any" : "1"}
                    value={value === null ? min : value} onChange={onChange} /> {suffix}
         </p>
     )
@@ -119,7 +119,9 @@ class ThroughputComponent extends React.Component {
                 <NumberInput id="bot_count" min="1" max="100000" value={this.state.botCount}
                             label="Number of bots: " onChange={this.botCountChanged.bind(this)} />
                 <NumberInput id="throughput" min="0" max="1000000" value={this.state.throughput} allowReals={true}
-                            label="Throughput: " onChange={this.throughputChanged.bind(this)} suffix="items/sec"/>
+                            label="Throughput (one way): " onChange={this.throughputChanged.bind(this)} suffix="items/sec"/>
+                <NumberInput id="throughput" min="0" max="1000000" value={0.5*this.state.throughput} allowReals={true}
+                            label="Throughput (return): " onChange={this.throughput2Changed.bind(this)} suffix="items/sec"/>
             </div>
         );
     }
@@ -147,7 +149,15 @@ class ThroughputComponent extends React.Component {
     }
 
     throughputChanged(event) {
-        const throughput = parseFloat(event.target.value);
+        this._throughputChanged(event);
+    }
+
+    throughput2Changed(event) {
+        this._throughputChanged(event, 2);
+    }
+
+    _throughputChanged(event, multiplier) {
+        const throughput = multiplier * parseFloat(event.target.value);
         this.setState((ps) => {
             const stats = new ThroughputStats({...ps, throughput});
             return {
@@ -205,5 +215,11 @@ class ThroughputStats {
 
     forBotCount() {
         return this.throughput * this.travelDistance / this.itemsPerMeterSecond;
+    }
+}
+
+
+class RechargeStats {
+    constructor({robots}) {
     }
 }
