@@ -93,7 +93,6 @@ class RobotUpgradesComponent extends React.Component {
                     <li>Distance before recharge needed: <b>{formatNumber(roboStats.distanceUntilRecharge)}</b> m</li>
                     <li>Cargo size: <b>{roboStats.cargoSize}</b></li>
                     <li>Single bot throughput (ignoring recharge): <b>{formatNumber(roboStats.singleBotMeterThroughput)}</b> items*m/s</li>
-                    <li>Charging time: <b>{roboStats.chargingTime}</b> s</li>
                 </ul>
             </div>
         );
@@ -199,12 +198,33 @@ class ChargingComponent extends React.Component {
                 <NumberInput id="charging_distance" min="0" max="10000" value={this.state.chargingDistance}
                             label="Charging distance (one-way): " onChange={this.chargingDistanceChanged.bind(this)} />
                 <ul>
-                    <li>Charging penalty: <b>{formatNumber(stats.overheadFraction)}</b></li>
+                    <li>{this._renderPhases(stats)}</li>
                     <li>Charging time fraction: <b>{formatNumber(stats.chargingFraction)}</b></li>
                     <li>Expected % of bots charging at a time: <b>{formatNumber(100.0*stats.chargingFraction)}</b></li>
+                    <li>Overhead time fraction: <b>{formatNumber(stats.overheadFraction)}</b></li>
                     <li>Single bot throughput (adjusted for recharge): <b>{formatNumber(stats.singleBotMeterThroughput)}</b> items*m/s</li>
                 </ul>
             </div>
+        );
+    }
+
+    _renderPhases(stats) {
+        const rows = stats.phases.map((phase, i) => (
+            <tr key={i}>
+                <td>{phase.name}</td>
+                <td>{formatNumber(phase.duration)}</td>
+                <td>{phase.energyStart}</td>
+                <td>{phase.energyEnd}</td>
+            </tr>
+        ));
+        return (
+            <table>
+                <tbody>
+                    <tr><th>phase</th><th>duration</th><th>starting energy</th><th>final energy</th></tr>
+                    {rows}
+                    <tr><th>total</th><th>{formatNumber(stats.cycleTime)}</th><td></td><td></td></tr>
+                </tbody>
+            </table>
         );
     }
 
@@ -219,9 +239,10 @@ class ChargingComponent extends React.Component {
 
 class Robots {
     baseSpeed = 3.0;  // m/s
-    energyBeforeCharge = 1200;  // kJ
+    maxChargeLevel = 1500;  // kJ 
+    forceChargeLevel = 300;  // kJ
+    energyBeforeCharge = this.maxChargeLevel - this.forceChargeLevel;  // kJ
     roboportChargingPower = 1000;  // kW
-    chargingTime = this.energyBeforeCharge / this.roboportChargingPower;
 
     constructor({cargoUpgrades, speedUpgrades}) {
         this.speed = this.baseSpeed * this._getSpeedMultiplier(speedUpgrades);
@@ -243,6 +264,14 @@ class Robots {
             case 5: return 3.40;
             default: return 3.40 + 0.65*(speedUpgrades - 5);
         }
+    }
+
+    energyForDistance(s) {
+        return this.energyForDuration(s / this.speed);
+    }
+
+    energyForDuration(t) {
+        return 5.0 * t * this.speed + 3.0 * t;
     }
 }
 
@@ -274,12 +303,36 @@ class RechargeStats {
         this.robots = robots;
         this.chargingDistance = chargingDistance;
 
+        this.chargingTimeForChargeTravel = robots.energyForDistance(chargingDistance) / robots.roboportChargingPower;
+        this.chargingTime = this.chargingTimeForChargeTravel + robots.energyBeforeCharge / robots.roboportChargingPower;
         this.chargeTravelTimeOneWay = chargingDistance / robots.speed;
-        this.overheadTime = 2.0*this.chargeTravelTimeOneWay + robots.chargingTime;
+        this.overheadTime = 2.0*this.chargeTravelTimeOneWay + this.chargingTime;
         this.usefulTime = robots.timeUntilRecharge - this.chargeTravelTimeOneWay;
         this.cycleTime = this.overheadTime + this.usefulTime;
         this.overheadFraction = this.overheadTime / this.cycleTime;
-        this.chargingFraction = robots.chargingTime / this.cycleTime;
+        this.chargingFraction = this.chargingTime / this.cycleTime;
+
+        this.phases = [{
+            name: 'go-to-work',
+            energyStart: robots.maxChargeLevel,
+            duration: this.chargeTravelTimeOneWay,
+        }, {
+            name: 'work',
+            duration: this.usefulTime,
+        }, {
+            name: 'go-to-roboport',
+            duration: this.chargeTravelTimeOneWay,
+        }, {
+            name: 'charging',
+            duration: this.chargingTime,
+            energyEnd: robots.maxChargeLevel,
+        }];
+
+        for (let i=0; i<this.phases.length-1; ++i) {
+            const phase = this.phases[i];
+            phase.energyEnd = Math.round(phase.energyStart - robots.energyForDuration(phase.duration));
+            this.phases[i+1].energyStart = phase.energyEnd;
+        }
 
         this.singleBotMeterThroughput = robots.singleBotMeterThroughput * (1.0 - this.overheadFraction);
     }
